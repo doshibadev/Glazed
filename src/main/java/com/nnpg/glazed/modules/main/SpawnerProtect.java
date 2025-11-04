@@ -13,9 +13,10 @@ import net.minecraft.client.option.KeyBinding;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
 import net.minecraft.util.math.Direction;
-import net.minecraft.text.Text;
 import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.text.Text;
 import net.minecraft.screen.GenericContainerScreenHandler;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
@@ -150,6 +151,8 @@ public class SpawnerProtect extends Module {
 
     private World trackedWorld = null;
     private int worldChangeCount = 0;
+    // If there are this many or more other players online, do not activate protection
+    private final int PLAYER_COUNT_THRESHOLD = 3;
 
     public SpawnerProtect() {
         super(GlazedAddon.CATEGORY, "SpawnerProtect", "Breaks spawners and puts them in your inv when a player is detected");
@@ -271,6 +274,11 @@ public class SpawnerProtect extends Module {
     }
 
     private boolean checkEmergencyDisconnect() {
+        // If there are too many other players online (e.g., spawn crowded during restart),
+        // skip emergency disconnect logic to avoid false positives.
+        long otherPlayers = mc.world.getPlayers().stream().filter(p -> p != mc.player).count();
+        if (otherPlayers >= PLAYER_COUNT_THRESHOLD) return false;
+
         for (PlayerEntity player : mc.world.getPlayers()) {
             if (player == mc.player) continue;
             if (player == null) continue;
@@ -291,7 +299,7 @@ public class SpawnerProtect extends Module {
 
                 toggle();
                 if (mc.world != null) {
-                    mc.world.disconnect(Text.literal(""));
+                    mc.world.disconnect(Text.literal("Disconnected by SpawnerProtect (emergency)"));
                 }
 
                 detectedPlayer = playerName;
@@ -307,6 +315,10 @@ public class SpawnerProtect extends Module {
     }
 
     private void checkForPlayers() {
+        // If there are many other players (spawn crowd / server restart), don't activate protection
+        long otherPlayers = mc.world.getPlayers().stream().filter(p -> p != mc.player).count();
+        if (otherPlayers >= PLAYER_COUNT_THRESHOLD) return;
+
         for (PlayerEntity player : mc.world.getPlayers()) {
             if (player == mc.player) continue;
             if (player == null) continue;
@@ -476,6 +488,8 @@ public class SpawnerProtect extends Module {
 
         if (sneak && !sneaking) {
             mc.player.setSneaking(true);
+            // Sending explicit sneak packets is unnecessary for compatibility across mappings.
+            // We rely on setting the player's sneaking state locally.
             sneaking = true;
         } else if (!sneak && sneaking) {
             mc.player.setSneaking(false);
@@ -674,7 +688,7 @@ public class SpawnerProtect extends Module {
         }
 
         if (mc.world != null) {
-            mc.world.disconnect(Text.literal(""));
+            mc.world.disconnect(Text.literal("Disconnected by SpawnerProtect"));
         }
 
         info("Disconnected due to player detection.");

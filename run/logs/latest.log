@@ -1,0 +1,26 @@
+[08:51:03] [main/INFO] (FabricLoader/GameProvider) Loading Minecraft 1.21.8 with Fabric Loader 0.16.14
+[08:51:04] [main/INFO] (FabricLoader) Loading 9 mods:
+	- baritone-meteor 1.21.8-SNAPSHOT
+	- fabric-api-base 0.4.64+9ec45cd8f3
+	- fabric-resource-loader-v0 3.1.11+946bf4c3f3
+	- fabricloader 0.16.14
+	- glazed 1.21.8-n-14
+	- java 21
+	- meteor-client 1.21.8-69
+	- minecraft 1.21.8
+	- mixinextras 0.4.1
+[08:51:05] [main/INFO] (FabricLoader/Mixin) SpongePowered MIXIN Subsystem Version=0.8.7 Source=file:/C:/Users/AR3/.gradle/caches/modules-2/files-2.1/net.fabricmc/sponge-mixin/0.15.4+mixin.0.8.7/6a12aacc794f1078458433116e9ed42c1cc98096/sponge-mixin-0.15.4+mixin.0.8.7.jar Service=Knot/Fabric Env=CLIENT
+[08:51:05] [main/INFO] (FabricLoader/Mixin) Loaded Fabric development mappings for mixin remapper!
+[08:51:05] [main/INFO] (FabricLoader/Mixin) Compatibility level set to JAVA_21
+[08:51:09] [main/INFO] (FabricLoader/MixinExtras|Service) Initializing MixinExtras via com.llamalad7.mixinextras.service.MixinExtrasServiceImpl(version=0.4.1).
+[08:51:15] [Datafixer Bootstrap/INFO] (Minecraft) 269 Datafixer optimizations took 2449 milliseconds
+[08:51:33] [main/WARN] (FabricLoader/Mixin) Error loading class: net/minecraft/client/player/LocalPlayer (java.lang.ClassNotFoundException: net/minecraft/client/player/LocalPlayer)
+[08:51:34] [Render thread/INFO] (Minecraft) Environment: Environment[sessionHost=https://sessionserver.mojang.com, servicesHost=https://api.minecraftservices.com, name=PROD]
+[08:51:34] [Render thread/INFO] (Minecraft) Setting user: Player995
+[08:51:36] [Render thread/INFO] (Minecraft) Backend library: LWJGL version 3.3.3-snapshot
+[08:51:39] [Render thread/INFO] (Minecraft) Using optional rendering extensions: GL_ARB_buffer_storage, GL_KHR_debug, GL_ARB_vertex_attrib_binding
+[08:51:42] [Render thread/INFO] (Minecraft) Reloading ResourceManager: vanilla, fabric, fabric-api-base, fabric-resource-loader-v0, fabricloader, glazed, meteor-client
+[08:51:43] [Render thread/INFO] (Minecraft) [CHAT] [Baritone] Baritone settings file not found, resetting.
+[08:51:43] [Worker-Main-3/INFO] (Minecraft) Found unifont_all_no_pua-16.0.03.hex, loading
+[08:51:43] [Worker-Main-2/INFO] (Minecraft) Found unifont_pua-16.0.03.hex, loading
+[08:51:44] [Worker-Main-3/INFO] (Minecraft) Found unifont_jp_patch-16.0.03.hex, loading
