@@ -20,7 +20,7 @@ public class VersionUtil {
     }
 
     public static void setSelectedSlot(ClientPlayerEntity player, int slot) {
-    player.getInventory().setSelectedSlot(slot);
+    player.getInventory().selectedSlot = slot;
     }
 
     public static double getPrevX(net.minecraft.entity.Entity entity) {

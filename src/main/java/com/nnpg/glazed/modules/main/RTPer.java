@@ -450,9 +450,9 @@ public class RTPer extends Module {
 
     private String getBiomeIdAt(BlockPos pos) {
         if (mc.world == null) return null;
-        Biome biome = mc.world.getBiome(pos).value();
-        if (biome == null) return null;
-        Identifier id = mc.world.getRegistryManager().getOrThrow(RegistryKeys.BIOME).getId(biome);
+    Biome biome = mc.world.getBiome(pos).value();
+    if (biome == null) return null;
+    Identifier id = mc.world.getRegistryManager().get(RegistryKeys.BIOME).getId(biome);
         return id != null ? id.toString() : null;
     }
 

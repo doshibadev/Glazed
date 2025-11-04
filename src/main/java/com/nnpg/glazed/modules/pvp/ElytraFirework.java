@@ -56,16 +56,16 @@ public class ElytraFirework extends Module {
         ItemStack chest = mc.player.getEquippedStack(EquipmentSlot.CHEST);
         boolean isWearingElytra = chest.isOf(Items.ELYTRA);
 
-        if (mc.player.isGliding() && isWearingElytra && !hasFired) {
+        if (mc.player.isFallFlying() && isWearingElytra && !hasFired) {
             ItemStack stack = mc.player.getInventory().getStack(fireworkSlot.get());
             if (stack.isOf(Items.FIREWORK_ROCKET)) {
-                mc.player.getInventory().setSelectedSlot(fireworkSlot.get());
+                mc.player.getInventory().selectedSlot = fireworkSlot.get();
                 mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
                 mc.player.swingHand(Hand.MAIN_HAND);
                 hasFired = true;
             }
         }
 
-        if (!mc.player.isGliding()) hasFired = false;
+        if (!mc.player.isFallFlying()) hasFired = false;
     }
 }

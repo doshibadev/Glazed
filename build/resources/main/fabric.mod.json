@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "glazed",
-  "version": "1.21.4-n-14",
+  "version": "1.21.1-n-01",
   "name": "Glazed",
   "description": "An Addon made for donutsmp",
   "authors": [
@@ -37,7 +37,7 @@
   },
   "depends": {
     "java": ">=21",
-    "minecraft": [ "1.21.4" ],
+    "minecraft": [ "1.21.1" ],
     "meteor-client": "*"
   }
 

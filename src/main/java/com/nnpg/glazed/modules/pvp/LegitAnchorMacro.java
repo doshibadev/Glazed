@@ -190,7 +190,7 @@ public class LegitAnchorMacro extends Module {
     private void swapToItem(net.minecraft.item.Item item) {
         FindItemResult result = InvUtils.findInHotbar(item);
         if (result.found()) {
-            mc.player.getInventory().setSelectedSlot(result.slot());
+            mc.player.getInventory().selectedSlot = result.slot();
         }
     }
 }

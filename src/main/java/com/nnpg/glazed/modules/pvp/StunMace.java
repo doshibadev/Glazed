@@ -101,17 +101,17 @@ public class StunMace extends Module {
                 currentTarget = target;
 
                 // Axe hit
-                player.getInventory().setSelectedSlot(axeSlot.get());
+                player.getInventory().selectedSlot = axeSlot.get();
                 mc.interactionManager.attackEntity(player, target);
                 player.swingHand(Hand.MAIN_HAND);
 
                 // Mace hit
-                player.getInventory().setSelectedSlot(maceSlot.get());
+                player.getInventory().selectedSlot = maceSlot.get();
                 mc.interactionManager.attackEntity(player, target);
                 player.swingHand(Hand.MAIN_HAND);
 
                 // Return to chosen slot immediately (same tick)
-                player.getInventory().setSelectedSlot(returnSlot.get());
+                player.getInventory().selectedSlot = returnSlot.get();
 
                 comboActive = false;
                 currentTarget = null;

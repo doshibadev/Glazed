@@ -64,7 +64,7 @@ public class AutoPearlChain extends Module {
             if (pearlSlot == -1) return;
 
             prevSlot = mc.player.getInventory().selectedSlot;
-            mc.player.getInventory().setSelectedSlot(pearlSlot);
+            mc.player.getInventory().selectedSlot = pearlSlot;
             mc.interactionManager.interactItem(mc.player, Hand.MAIN_HAND);
             mc.player.swingHand(Hand.MAIN_HAND);
 
@@ -83,7 +83,7 @@ public class AutoPearlChain extends Module {
                         return;
                     }
                     if (prevSlot != -1) {
-                        mc.player.getInventory().setSelectedSlot(prevSlot);
+                        mc.player.getInventory().selectedSlot = prevSlot;
                     }
                 }
 

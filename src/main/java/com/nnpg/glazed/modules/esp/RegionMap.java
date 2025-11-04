@@ -280,7 +280,10 @@ public class RegionMap extends Module {
             if (isValidGridPosition(gridPos[0], gridPos[1])) {
                 int index = gridPos[1] * MAP_SIZE + gridPos[0];
                 RegionInfo info = regionMap.get(index);
-                return info != null ? regionTypeNames[info.regionType] : "Unknown";
+                if (info != null && info.regionType >= 0 && info.regionType < regionTypeNames.length) {
+                    return regionTypeNames[info.regionType];
+                }
+                return "Unknown";
             }
             return "Unknown";
         }
@@ -305,8 +308,14 @@ public class RegionMap extends Module {
         }
 
         public double[] worldToCellPosition(double worldX, double worldZ) {
-            double cellX = ((worldX + MAP_OFFSET) % REGION_SIZE) / REGION_SIZE;
-            double cellZ = ((worldZ + MAP_OFFSET) % REGION_SIZE) / REGION_SIZE;
+            double nx = (worldX + MAP_OFFSET);
+            double nz = (worldZ + MAP_OFFSET);
+            double remX = nx % REGION_SIZE;
+            double remZ = nz % REGION_SIZE;
+            if (remX < 0) remX += REGION_SIZE;
+            if (remZ < 0) remZ += REGION_SIZE;
+            double cellX = remX / REGION_SIZE;
+            double cellZ = remZ / REGION_SIZE;
             return new double[]{cellX, cellZ};
         }
 

@@ -95,13 +95,13 @@ public class BreachSwap extends Module {
 
                 // Mace hit
                 LOGGER.info("Switching to mace slot: " + maceSlot.get()); // Log slot switch
-                player.getInventory().setSelectedSlot(maceSlot.get());
+                player.getInventory().selectedSlot = maceSlot.get();
                 mc.interactionManager.attackEntity(player, target);
                 player.swingHand(Hand.MAIN_HAND);
 
                 // Return to the return slot immediately (same tick)
                 LOGGER.info("Returning to slot: " + returnSlot.get()); // Log return slot
-                player.getInventory().setSelectedSlot(returnSlot.get());
+                player.getInventory().selectedSlot = returnSlot.get();
 
                 // Combo complete
                 comboActive = false;

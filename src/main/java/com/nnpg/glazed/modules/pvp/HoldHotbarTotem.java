@@ -29,8 +29,8 @@ public class HoldHotbarTotem extends Module {
 
         if (wasHoldingTotem && !holdingNow) {
             int slot = findHotbarTotem();
-            if (slot != -1) {
-                mc.player.getInventory().setSelectedSlot(slot);
+                if (slot != -1) {
+                mc.player.getInventory().selectedSlot = slot;
                 mc.player.networkHandler.sendPacket(new UpdateSelectedSlotC2SPacket(slot));
             }
         }

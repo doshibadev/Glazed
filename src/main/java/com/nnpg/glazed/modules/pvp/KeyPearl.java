@@ -87,7 +87,7 @@ public class KeyPearl extends Module {
                     return;
                 }
                 if (prevSlot != -1) {
-                    mc.player.getInventory().setSelectedSlot(prevSlot);
+                    mc.player.getInventory().selectedSlot = prevSlot;
                 }
             }
 
@@ -101,9 +101,9 @@ public class KeyPearl extends Module {
         prevSlot = mc.player.getInventory().selectedSlot;
 
         // Find pearl in hotbar
-        for (int i = 0; i < 9; i++) {
+                for (int i = 0; i < 9; i++) {
             if (mc.player.getInventory().getStack(i).getItem() == Items.ENDER_PEARL) {
-                mc.player.getInventory().setSelectedSlot(i);
+                mc.player.getInventory().selectedSlot = i;
                 throwing = true;
                 delayCounter = 0;
                 switchCounter = 0;

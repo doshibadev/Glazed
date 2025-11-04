@@ -32,8 +32,11 @@ repositories {
         mappings("net.fabricmc:yarn:${properties["yarn_mappings"] as String}:v2")
         modImplementation("net.fabricmc:fabric-loader:${properties["loader_version"] as String}")
 
-        // Meteor
-        modImplementation("meteordevelopment:meteor-client:${properties["minecraft_version"] as String}-SNAPSHOT")
+    // Meteor
+    // Use a pinned meteor_version rather than assuming a meteor artifact matching the
+    // Minecraft version is published. See examples like KassuK1/BlackOut which pin
+    // `meteor_version` in gradle.properties.
+    modImplementation("meteordevelopment:meteor-client:${properties["meteor_version"] as String}")
 
 
         // Baritone
