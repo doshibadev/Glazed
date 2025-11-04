@@ -11,19 +11,23 @@ import meteordevelopment.orbit.EventHandler;
 import meteordevelopment.meteorclient.events.game.GameJoinedEvent;
 import meteordevelopment.meteorclient.events.game.GameLeftEvent;
 import meteordevelopment.meteorclient.MeteorClient;
-
+import net.minecraft.item.Items;
+import net.minecraft.item.ItemStack;
+import meteordevelopment.meteorclient.systems.modules.Category;
 
 
 
 
 public class GlazedAddon extends MeteorAddon {
-    public static final Category CATEGORY = new Category("Glazed");
-    public static final Category esp = new Category("Glazed-ESPs");
-    public static final Category pvp = new Category("Glazed-PVP");
+
+public static final Category CATEGORY = new Category("Glazed", new ItemStack(Items.CAKE));
+public static final Category esp = new Category("Glazed ESP ", new ItemStack(Items.VINE));
+public static final Category pvp = new Category("Glazed PVP", new ItemStack(Items.DIAMOND_SWORD));
 
 
 
-    public static int MyScreenVERSION = 13;
+
+    public static int MyScreenVERSION = 14;
 
     @Override
     public void onInitialize() {
@@ -31,30 +35,23 @@ public class GlazedAddon extends MeteorAddon {
 
 
         Modules.get().add(new SpawnerProtect()); //done
-        Modules.get().add(new PearlThrow()); //done
-        Modules.get().add(new RTPBaseFinder()); //done
         Modules.get().add(new AntiTrap()); //done
         Modules.get().add(new CoordSnapper()); //done
-        Modules.get().add(new AutoFirework()); //done
         Modules.get().add(new ElytraSwap()); //done
         Modules.get().add(new PlayerDetection()); //done
         Modules.get().add(new AHSniper()); //done
         Modules.get().add(new RTPer()); //done
-        Modules.get().add(new TunnelBaseFinder()); //done
         Modules.get().add(new ShulkerDropper()); //done
         Modules.get().add(new AutoSell()); //done
         Modules.get().add(new SpawnerDropper()); //done
         Modules.get().add(new AutoShulkerOrder()); // done
         Modules.get().add(new AutoOrder()); //done
         Modules.get().add(new HideScoreboard());
-        Modules.get().add(new AutoInvTotem());
         Modules.get().add(new LegitCrystalMacro());
-        Modules.get().add(new CrystalMacro());
         Modules.get().add(new AHSell());
         Modules.get().add(new AnchorMacro());
         Modules.get().add(new OneByOneHoles());
         Modules.get().add(new KelpESP());
-        Modules.get().add(new DeepslateESP());
         Modules.get().add(new DripstoneESP());
         Modules.get().add(new RotatedDeepslateESP());
         Modules.get().add(new CrateBuyer());
@@ -63,7 +60,6 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new AdvancedStashFinder());
         Modules.get().add(new TpaMacro());
         Modules.get().add(new TabDetector());
-        Modules.get().add(new AutoSex());
         Modules.get().add(new OrderSniper());
         Modules.get().add(new LamaESP());
         Modules.get().add(new PillagerESP());
@@ -74,9 +70,7 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new EmergencySeller());
         Modules.get().add(new RTPEndBaseFinder());
         Modules.get().add(new ShopBuyer());
-        Modules.get().add(new UndetectedTunneler());
         Modules.get().add(new OrderDropper());
-        Modules.get().add(new ElytraAutoFly());
         Modules.get().add(new CollectibleESP());
         Modules.get().add(new SpawnerNotifier());
         Modules.get().add(new VineESP());
@@ -85,14 +79,50 @@ public class GlazedAddon extends MeteorAddon {
         Modules.get().add(new LegitAnchorMacro());
         Modules.get().add(new SpawnerOrder());
         Modules.get().add(new RegionMap());
+        Modules.get().add(new SpawnerOrder());
+        Modules.get().add(new RegionMap());
+        Modules.get().add(new SpawnerOrder());
+        Modules.get().add(new RegionMap());
+        Modules.get().add(new AutoShulkerShellOrder());
+        Modules.get().add(new NoBlockInteract());
+        Modules.get().add(new BeehiveESP());
+        Modules.get().add(new WindPearlMacro());
+        Modules.get().add(new QuickShieldBreaker());
+        Modules.get().add(new UDTriggerBot());
+        Modules.get().add(new SwordPlaceObsidian());
+        Modules.get().add(new ChestAndShulkerStealer());
+        Modules.get().add(new DoubleAnchorMacro());
+        Modules.get().add(new StunMace());
+        Modules.get().add(new HoldHotbarTotem());
+        Modules.get().add(new SweetBerryESP());
+        Modules.get().add(new ElytraFirework());
+        Modules.get().add(new PistonESP());
+        Modules.get().add(new TpaAllMacro());
+        Modules.get().add(new RTPNetherBaseFinder());
+        Modules.get().add(new HomeReset());
+        Modules.get().add(new KeyPearl());
+        Modules.get().add(new DrownedTridentESP());
+        Modules.get().add(new RTPBaseFinder());
         Modules.get().add(new HoverTotem());
-        Modules.get().add(new Itemswap());
-        Modules.get().add(new AutoTrident());
-        Modules.get().add(new AutoTreeFarmer());
+        Modules.get().add(new TapResetMacro());
+        Modules.get().add(new JumpResetMacro());
+        Modules.get().add(new TunnelBaseFinder());
+        Modules.get().add(new AimAssist());
+        Modules.get().add(new HumanTriggerBot());
+        Modules.get().add(new SkeletonESP());
+        Modules.get().add(new RainNoti());
+        Modules.get().add(new AutoPearlChain());
+        Modules.get().add(new AutoBlazeRodOrder());
+        Modules.get().add(new SwordAxePlaceCobweb());
+        Modules.get().add(new BlazeRodDropper());
+        Modules.get().add(new BreachSwap());
+        Modules.get().add(new FakeScoreboard());
+        Modules.get().add(new AutoInvTotem());
+        Modules.get().add(new FreecamMining());
+        Modules.get().add(new BedrockVoidESP());
+        Modules.get().add(new UIHelper());
 
 
-
-        // Register this class for events
         MeteorClient.EVENT_BUS.subscribe(this);
     }
 

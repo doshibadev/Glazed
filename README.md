@@ -20,7 +20,7 @@
 
 ---
 
-## 🚀 Features
+## 🚀 Features (OUTDATED)
 
 ### 📌 Main Modules
 
@@ -180,13 +180,11 @@ Coming soon
 Huge thanks to the projects that make this addon possible:
 
 - [Meteor Client](https://github.com/MeteorDevelopment/meteor-client)
-- [Meteor Rejects](https://github.com/AntiCope/meteor-rejects)
 - [Baritone](https://github.com/cabaletta/baritone)
 - [FabricMC](https://fabricmc.net/)
 - [Claude AI](https://claude.ai/)
-- [szpuszi](https://github.com/szpuszi)
-- [dankor](https://github.com/dankor1337)
-- [Potato]
+- [critical]
+- [AR3]
 ---
 
 ## ⚠️ Disclaimer

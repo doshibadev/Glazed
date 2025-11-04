@@ -40,6 +40,7 @@ repositories {
         modImplementation("meteordevelopment:baritone:${properties["baritone_version"] as String}-SNAPSHOT")
 
         implementation("com.google.code.gson:gson:2.10.1")
+        
 
 
 

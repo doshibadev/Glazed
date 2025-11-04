@@ -9,11 +9,14 @@ import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.settings.*;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.Utils;
+import meteordevelopment.meteorclient.utils.render.MeteorToast;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.client.sound.PositionedSoundInstance;
+import net.minecraft.fluid.FluidState;
+import net.minecraft.item.Items;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.state.property.Properties;
 import net.minecraft.text.Text;
@@ -22,34 +25,39 @@ import net.minecraft.util.math.Box;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.World;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.ChunkSection;
 import net.minecraft.world.chunk.WorldChunk;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 
-import java.util.Set;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.Queue;
 
 public class ChunkFinder extends Module {
+    public enum Mode {
+        Chat,
+        Toast,
+        Both
+    }
+
     private final SettingGroup sgDetection = settings.createGroup("Detection");
-    private final SettingGroup sgRange = settings.createGroup("Range");
     private final SettingGroup sgRender = settings.createGroup("Render");
     private final SettingGroup sgBlockHighlight = settings.createGroup("Block Highlighting");
     private final SettingGroup sgPerformance = settings.createGroup("Performance");
     private final SettingGroup sgNotifications = settings.createGroup("Notifications");
 
-    // Detection settings
     private final Setting<Boolean> detectDeepslate = sgDetection.add(new BoolSetting.Builder()
         .name("detect-deepslate")
-        .description("Flag chunks with suspicious deepslate patterns (Y ≥ 8)")
-        .defaultValue(true)
+        .description("Find deepslate blocks")
+        .defaultValue(false)
         .build());
 
     private final Setting<Boolean> detectCobbledDeepslate = sgDetection.add(new BoolSetting.Builder()
@@ -64,32 +72,46 @@ public class ChunkFinder extends Module {
         .defaultValue(true)
         .build());
 
-    private final Setting<Boolean> detectOneByOneHoles = sgDetection.add(new BoolSetting.Builder()
-        .name("detect-air-pockets")
-        .description("Locate artificial air pockets in solid stone")
-        .defaultValue(false)
+    private final Setting<Boolean> detectEndStone = sgDetection.add(new BoolSetting.Builder()
+        .name("detect-end-stone")
+        .description("Find end stone blocks (disabled in The End dimension)")
+        .defaultValue(true)
         .build());
 
-    private final Setting<Boolean> detectEnclosedOres = sgDetection.add(new BoolSetting.Builder()
-        .name("detect-enclosed-ores")
-        .description("Find ores completely surrounded by stone")
-        .defaultValue(false)
+    private final Setting<Boolean> ignoreExposed = sgDetection.add(new BoolSetting.Builder()
+        .name("ignore-exposed")
+        .description("Ignore suspicious blocks that are exposed to air or fluid (treats water/lava like air)")
+        .defaultValue(true)
         .build());
 
-    // Thresholds
+    private final Setting<Boolean> ignoreTrialChambers = sgDetection.add(new BoolSetting.Builder()
+        .name("ignore-trial-chambers")
+        .description("Ignore chunks containing trial chambers (based on waxed copper blocks and tuff bricks)")
+        .defaultValue(true)
+        .build());
+
+    private final Setting<Integer> trialChamberThreshold = sgDetection.add(new IntSetting.Builder()
+        .name("trial-chamber-threshold")
+        .description("Minimum waxed copper or tuff brick blocks to identify a trial chamber")
+        .defaultValue(50)
+        .range(1, 50)
+        .sliderRange(1, 50)
+        .visible(ignoreTrialChambers::get)
+        .build());
+
     private final Setting<Integer> deepslateThreshold = sgDetection.add(new IntSetting.Builder()
         .name("deepslate-threshold")
-        .description("Min deepslate count to flag chunk")
-        .defaultValue(3)
-        .range(1, 25)
-        .sliderRange(1, 25)
+        .description("Min deepslate to flag chunk")
+        .defaultValue(1)
+        .range(1, 15)
+        .sliderRange(1, 15)
         .visible(detectDeepslate::get)
         .build());
 
     private final Setting<Integer> cobbledDeepslateThreshold = sgDetection.add(new IntSetting.Builder()
         .name("cobbled-deepslate-threshold")
         .description("Min cobbled deepslate to flag chunk")
-        .defaultValue(1)
+        .defaultValue(4)
         .range(1, 15)
         .sliderRange(1, 15)
         .visible(detectCobbledDeepslate::get)
@@ -98,48 +120,21 @@ public class ChunkFinder extends Module {
     private final Setting<Integer> rotatedDeepslateThreshold = sgDetection.add(new IntSetting.Builder()
         .name("rotated-threshold")
         .description("Min rotated deepslate to flag chunk")
-        .defaultValue(2)
+        .defaultValue(3)
         .range(1, 20)
         .sliderRange(1, 20)
         .visible(detectRotatedDeepslate::get)
         .build());
 
-    private final Setting<Integer> airPocketThreshold = sgDetection.add(new IntSetting.Builder()
-        .name("air-pocket-threshold")
-        .description("Min air pockets to flag chunk")
-        .defaultValue(1)
-        .range(1, 8)
-        .sliderRange(1, 8)
-        .visible(detectOneByOneHoles::get)
-        .build());
-
-    private final Setting<Integer> enclosedOreThreshold = sgDetection.add(new IntSetting.Builder()
-        .name("enclosed-ore-threshold")
-        .description("Min enclosed ores to flag chunk")
+    private final Setting<Integer> endStoneThreshold = sgDetection.add(new IntSetting.Builder()
+        .name("end-stone-threshold")
+        .description("Min end stone count to flag chunk")
         .defaultValue(2)
         .range(1, 15)
         .sliderRange(1, 15)
-        .visible(detectEnclosedOres::get)
+        .visible(detectEndStone::get)
         .build());
 
-    // Range settings
-    private final Setting<Integer> minScanY = sgRange.add(new IntSetting.Builder()
-        .name("min-y")
-        .description("Minimum Y level for scanning")
-        .defaultValue(-20)
-        .range(-64, 64)
-        .sliderRange(-64, 64)
-        .build());
-
-    private final Setting<Integer> maxScanY = sgRange.add(new IntSetting.Builder()
-        .name("max-y")
-        .description("Maximum Y level for scanning")
-        .defaultValue(25)
-        .range(-32, 128)
-        .sliderRange(-32, 128)
-        .build());
-
-    // Chunk render settings
     private final Setting<Double> renderY = sgRender.add(new DoubleSetting.Builder()
         .name("render-height")
         .description("Height to render chunk highlights")
@@ -168,20 +163,6 @@ public class ChunkFinder extends Module {
         .sliderRange(0.1, 2.0)
         .build());
 
-    private final Setting<Boolean> drawTracers = sgRender.add(new BoolSetting.Builder()
-        .name("tracers")
-        .description("Draw lines to suspicious chunks")
-        .defaultValue(false)
-        .build());
-
-    private final Setting<SettingColor> tracerColor = sgRender.add(new ColorSetting.Builder()
-        .name("tracer-color")
-        .description("Color for tracer lines")
-        .defaultValue(new SettingColor(255, 69, 0, 180))
-        .visible(drawTracers::get)
-        .build());
-
-    // Block highlighting settings
     private final Setting<Boolean> highlightBlocks = sgBlockHighlight.add(new BoolSetting.Builder()
         .name("highlight-blocks")
         .description("Highlight individual suspicious blocks")
@@ -225,21 +206,13 @@ public class ChunkFinder extends Module {
         .visible(highlightBlocks::get)
         .build());
 
-    private final Setting<SettingColor> airPocketBlockColor = sgBlockHighlight.add(new ColorSetting.Builder()
-        .name("air-pocket-color")
-        .description("Color for artificial air pockets")
-        .defaultValue(new SettingColor(255, 255, 255, 100))
+    private final Setting<SettingColor> endStoneBlockColor = sgBlockHighlight.add(new ColorSetting.Builder()
+        .name("end-stone-color")
+        .description("Color for end stone blocks")
+        .defaultValue(new SettingColor(255, 255, 200, 200))
         .visible(highlightBlocks::get)
         .build());
 
-    private final Setting<SettingColor> enclosedOreBlockColor = sgBlockHighlight.add(new ColorSetting.Builder()
-        .name("enclosed-ore-color")
-        .description("Color for enclosed ores")
-        .defaultValue(new SettingColor(0, 255, 0, 200))
-        .visible(highlightBlocks::get)
-        .build());
-
-    // Performance settings
     private final Setting<Boolean> useMultiThreading = sgPerformance.add(new BoolSetting.Builder()
         .name("threading")
         .description("Use background threads for scanning")
@@ -279,17 +252,28 @@ public class ChunkFinder extends Module {
         .sliderRange(15, 300)
         .build());
 
-    // Notification settings
+    private final Setting<Mode> notificationMode = sgNotifications.add(new EnumSetting.Builder<Mode>()
+        .name("notification-mode")
+        .description("How to notify when suspicious chunks are detected")
+        .defaultValue(Mode.Both)
+        .build());
+
     private final Setting<Boolean> playSound = sgNotifications.add(new BoolSetting.Builder()
         .name("sound-alerts")
-        .description("Play sound when suspicious chunks found")
+        .description("Play sound when suspicious chunks or blocks are found")
         .defaultValue(true)
         .build());
 
     private final Setting<Boolean> chatAlerts = sgNotifications.add(new BoolSetting.Builder()
         .name("chat-alerts")
-        .description("Send chat notifications")
+        .description("Send chat notifications for suspicious chunks or blocks")
         .defaultValue(true)
+        .build());
+
+    private final Setting<Boolean> trialChamberAlerts = sgNotifications.add(new BoolSetting.Builder()
+        .name("trial-chamber-alerts")
+        .description("Send chat notifications for trial chambers")
+        .defaultValue(false)
         .build());
 
     private final Setting<Integer> maxAlerts = sgNotifications.add(new IntSetting.Builder()
@@ -300,14 +284,12 @@ public class ChunkFinder extends Module {
         .sliderRange(1, 20)
         .build());
 
-    // Data structures
     private final Set<ChunkPos> flaggedChunks = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<ChunkPos, ChunkAnalysis> chunkData = new ConcurrentHashMap<>();
     private final Set<ChunkPos> scannedChunks = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<ChunkPos, Long> notificationTimes = new ConcurrentHashMap<>();
     private final Queue<Long> recentAlerts = new ConcurrentLinkedQueue<>();
     private final AtomicLong activeScanCount = new AtomicLong(0);
-
     private final Map<BlockPos, SuspiciousBlock> suspiciousBlocks = new ConcurrentHashMap<>();
 
     private ExecutorService scannerPool;
@@ -315,7 +297,7 @@ public class ChunkFinder extends Module {
     private long lastCleanup = 0;
 
     public ChunkFinder() {
-        super(GlazedAddon.esp, "ChunkFinder", "ChunkFinderV3 Made by Potato same shit but better");
+        super(GlazedAddon.esp, "ChunkFinder", "ChunkFinderV4");
     }
 
     @Override
@@ -392,10 +374,10 @@ public class ChunkFinder extends Module {
         if (!shouldScan) return;
 
         BlockPos blockPos = event.pos;
-        if (blockPos.getY() < minScanY.get() || blockPos.getY() > maxScanY.get()) return;
+        if (blockPos.getY() < 0 || blockPos.getY() > 128) return;
 
         BlockState newState = event.newState;
-        if (isRelevantBlock(newState)) {
+        if (isRelevantBlock(newState) || newState.isAir()) {
             ChunkPos chunkPos = new ChunkPos(blockPos);
             WorldChunk chunk = (WorldChunk) mc.world.getChunk(chunkPos.x, chunkPos.z);
             scheduleChunkScan(chunk);
@@ -404,14 +386,17 @@ public class ChunkFinder extends Module {
 
     private boolean isRelevantBlock(BlockState state) {
         Block block = state.getBlock();
-        return block == Blocks.DEEPSLATE ||
-            block == Blocks.COBBLED_DEEPSLATE ||
-            block == Blocks.POLISHED_DEEPSLATE ||
-            block == Blocks.DEEPSLATE_BRICKS ||
-            block == Blocks.DEEPSLATE_TILES ||
-            block == Blocks.CHISELED_DEEPSLATE ||
-            block == Blocks.AIR ||
-            isValuableOre(block);
+        return
+            block == Blocks.DEEPSLATE ||
+                block == Blocks.COBBLED_DEEPSLATE ||
+                block == Blocks.POLISHED_DEEPSLATE ||
+                block == Blocks.DEEPSLATE_BRICKS ||
+                block == Blocks.DEEPSLATE_TILES ||
+                block == Blocks.CHISELED_DEEPSLATE ||
+                block == Blocks.END_STONE ||
+                block == Blocks.WAXED_COPPER_BLOCK ||
+                block == Blocks.WAXED_OXIDIZED_COPPER ||
+                block == Blocks.TUFF_BRICKS;
     }
 
     private void startInitialScan() {
@@ -442,13 +427,14 @@ public class ChunkFinder extends Module {
         }
     }
 
-    private void scheduleChunkScan(WorldChunk chunk) {
+    private void scheduleChunkScan(Chunk chunk) {
+        if (!(chunk instanceof WorldChunk worldChunk)) return;
         if (activeScanCount.get() >= maxConcurrentScans.get()) return;
 
         Runnable scanTask = () -> {
             try {
                 Thread.sleep(scanInterval.get() / 2);
-                analyzeChunk(chunk);
+                analyzeChunk(worldChunk);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
@@ -471,10 +457,8 @@ public class ChunkFinder extends Module {
         try {
             scannedChunks.add(pos);
 
-            int startX = pos.getStartX();
-            int startZ = pos.getStartZ();
-            int minY = Math.max(chunk.getBottomY(), minScanY.get());
-            int maxY = Math.min(chunk.getBottomY() + chunk.getHeight(), maxScanY.get());
+            int minY = 0; // Hardcode minimum Y to 0
+            int maxY = Math.min(chunk.getBottomY() + chunk.getHeight(), 128); // Hardcode maximum Y to 128
 
             ChunkAnalysis analysis = new ChunkAnalysis();
 
@@ -494,7 +478,7 @@ public class ChunkFinder extends Module {
             if (!shouldScan) return;
 
             ChunkSection section = sections[sectionIndex];
-            if (section.isEmpty()) continue;
+            if (section == null || section.isEmpty()) continue;
 
             int sectionY = chunk.getBottomY() + sectionIndex * 16;
             int startY = Math.max(0, minY - sectionY);
@@ -521,41 +505,135 @@ public class ChunkFinder extends Module {
     private void analyzeBlock(BlockPos blockPos, BlockState state, int worldY, ChunkAnalysis analysis) {
         SuspiciousBlockType blockType = null;
 
-        // Only detect deepslate at Y level 8 and above
-        if (detectDeepslate.get() && isNormalDeepslate(state) && worldY >= 8) {
+        // Count trial chamber blocks
+        if (ignoreTrialChambers.get() && isTrialChamberBlock(state)) {
+            analysis.trialChamberCount++;
+        }
+
+        // If ignoreExposed enabled, detect exposure (air or fluid) around the block
+        boolean exposed = false;
+        if (ignoreExposed.get()) {
+            exposed = isExposedToAirOrFluid(blockPos);
+        }
+
+        // Detect suspicious blocks
+        if (detectDeepslate.get() && isNormalDeepslate(state) && !exposed && !isInLargeDeepslateLine(blockPos, worldY)) {
             analysis.deepslateCount++;
             blockType = SuspiciousBlockType.DEEPSLATE;
         }
 
-        if (detectCobbledDeepslate.get() && isCobbledDeepslate(state)) {
-            analysis.cobbledDeepslateCount++;
-            blockType = SuspiciousBlockType.COBBLED_DEEPSLATE;
-        }
-
-        if (detectRotatedDeepslate.get() && isRotatedDeepslateBlock(state)) {
+        if (detectRotatedDeepslate.get() && isRotatedDeepslateBlock(state) && !exposed) {
             analysis.rotatedDeepslateCount++;
             blockType = SuspiciousBlockType.ROTATED_DEEPSLATE;
         }
 
-        if (activeScanCount.get() <= 2) {
-            if (detectOneByOneHoles.get() && isArtificialAirPocket(blockPos)) {
-                analysis.airPocketCount++;
-                blockType = SuspiciousBlockType.AIR_POCKET;
-            }
-
-            if (detectEnclosedOres.get() && isSuspiciousOre(state, blockPos)) {
-                analysis.enclosedOreCount++;
-                blockType = SuspiciousBlockType.ENCLOSED_ORE;
-            }
+        if (detectCobbledDeepslate.get() && isCobbledDeepslate(state) && !exposed) {
+            analysis.cobbledDeepslateCount++;
+            blockType = SuspiciousBlockType.COBBLED_DEEPSLATE;
         }
 
-        // Add block to suspicious blocks map if it's suspicious
+        if (detectEndStone.get() && isEndStone(state) && mc.world.getRegistryKey() != World.END && !exposed) {
+            analysis.endStoneCount++;
+            blockType = SuspiciousBlockType.END_STONE;
+        }
+
+        // Add block to suspicious blocks map if it's suspicious and highlighting enabled
         if (blockType != null && highlightBlocks.get()) {
             suspiciousBlocks.put(blockPos, new SuspiciousBlock(blockType, System.currentTimeMillis()));
         }
     }
 
+    private boolean isValidBlockPos(BlockPos pos) {
+        return pos.getY() >= mc.world.getBottomY() && pos.getY() < mc.world.getHeight();
+    }
+
+    private boolean isExposedToAirOrFluid(BlockPos pos) {
+        if (mc.world == null) return false;
+
+        for (Direction dir : Direction.values()) {
+            BlockPos offset = pos.offset(dir);
+            if (!isValidBlockPos(offset)) continue;
+            BlockState neighbor = mc.world.getBlockState(offset);
+            if (neighbor.isAir()) return true;
+
+            FluidState f = neighbor.getFluidState();
+            if (f != null && !f.isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private boolean isInLargeDeepslateLine(BlockPos pos, int worldY) {
+        if (mc.world == null) return false;
+
+        // Adjust threshold based on Y-level: stricter above deepslate layer
+        final int lineThreshold = worldY > -8 ? 50 : 20;
+
+        // Check X-axis
+        int xCount = 1; // Count the current block
+        // Forward (positive X)
+        for (int i = 1; i < lineThreshold; i++) {
+            BlockPos next = pos.offset(Direction.EAST, i);
+            if (!isValidBlockPos(next) || !isNormalDeepslate(mc.world.getBlockState(next))) break;
+            xCount++;
+        }
+        // Backward (negative X)
+        for (int i = 1; i < lineThreshold; i++) {
+            BlockPos prev = pos.offset(Direction.WEST, i);
+            if (!isValidBlockPos(prev) || !isNormalDeepslate(mc.world.getBlockState(prev))) break;
+            xCount++;
+        }
+        if (xCount >= lineThreshold) return true;
+
+        // Check Z-axis
+        int zCount = 1;
+        // Forward (positive Z)
+        for (int i = 1; i < lineThreshold; i++) {
+            BlockPos next = pos.offset(Direction.SOUTH, i);
+            if (!isValidBlockPos(next) || !isNormalDeepslate(mc.world.getBlockState(next))) break;
+            zCount++;
+        }
+        // Backward (negative Z)
+        for (int i = 1; i < lineThreshold; i++) {
+            BlockPos prev = pos.offset(Direction.NORTH, i);
+            if (!isValidBlockPos(prev) || !isNormalDeepslate(mc.world.getBlockState(prev))) break;
+            zCount++;
+        }
+        if (zCount >= lineThreshold) return true;
+
+        // Skip Y-axis check in deepslate levels (Y <= 0) to avoid over-filtering
+        if (worldY > 0) {
+            int yCount = 1;
+            // Up (positive Y)
+            for (int i = 1; i < lineThreshold; i++) {
+                BlockPos up = pos.offset(Direction.UP, i);
+                if (!isValidBlockPos(up) || !isNormalDeepslate(mc.world.getBlockState(up))) break;
+                yCount++;
+            }
+            // Down (negative Y)
+            for (int i = 1; i < lineThreshold; i++) {
+                BlockPos down = pos.offset(Direction.DOWN, i);
+                if (!isValidBlockPos(down) || !isNormalDeepslate(mc.world.getBlockState(down))) break;
+                yCount++;
+            }
+            if (yCount >= lineThreshold) return true;
+        }
+
+        return false;
+    }
+
     private void evaluateChunk(ChunkPos pos, ChunkAnalysis analysis) {
+        // Check for trial chamber
+        if (ignoreTrialChambers.get() && analysis.trialChamberCount >= trialChamberThreshold.get()) {
+            if (trialChamberAlerts.get() && mc.player != null) {
+                String message = String.format("ChunkFinder [%d, %d] - Trial chamber detected - Copper/Tuff blocks: %d",
+                    pos.x, pos.z, analysis.trialChamberCount);
+                notifyTrialChamber(message);
+            }
+            flaggedChunks.remove(pos);
+            notificationTimes.remove(pos);
+            return;
+        }
+
         boolean suspicious = false;
         StringBuilder reasons = new StringBuilder();
 
@@ -571,17 +649,12 @@ public class ChunkFinder extends Module {
 
         if (detectRotatedDeepslate.get() && analysis.rotatedDeepslateCount >= rotatedDeepslateThreshold.get()) {
             suspicious = true;
-            reasons.append("Rotated[").append(analysis.rotatedDeepslateCount).append("] ");
+            reasons.append("RotatedDeepslate[").append(analysis.rotatedDeepslateCount).append("] ");
         }
 
-        if (detectOneByOneHoles.get() && analysis.airPocketCount >= airPocketThreshold.get()) {
+        if (detectEndStone.get() && analysis.endStoneCount >= endStoneThreshold.get()) {
             suspicious = true;
-            reasons.append("AirPockets[").append(analysis.airPocketCount).append("] ");
-        }
-
-        if (detectEnclosedOres.get() && analysis.enclosedOreCount >= enclosedOreThreshold.get()) {
-            suspicious = true;
-            reasons.append("EnclosedOres[").append(analysis.enclosedOreCount).append("] ");
+            reasons.append("EndStone[").append(analysis.endStoneCount).append("] ");
         }
 
         if (suspicious) {
@@ -594,9 +667,11 @@ public class ChunkFinder extends Module {
         }
     }
 
-    // Block detection methods
     private boolean isNormalDeepslate(BlockState state) {
-        return state.getBlock() == Blocks.DEEPSLATE;
+        Block block = state.getBlock();
+        if (block != Blocks.DEEPSLATE || !state.contains(Properties.AXIS)) return false;
+        Direction.Axis axis = state.get(Properties.AXIS);
+        return axis == Direction.Axis.Y;
     }
 
     private boolean isCobbledDeepslate(BlockState state) {
@@ -604,101 +679,21 @@ public class ChunkFinder extends Module {
     }
 
     private boolean isRotatedDeepslateBlock(BlockState state) {
-        if (!state.contains(Properties.AXIS)) return false;
-
-        Direction.Axis axis = state.get(Properties.AXIS);
-        if (axis == Direction.Axis.Y) return false;
-
         Block block = state.getBlock();
-        return block == Blocks.DEEPSLATE ||
-            block == Blocks.POLISHED_DEEPSLATE ||
-            block == Blocks.DEEPSLATE_BRICKS ||
-            block == Blocks.DEEPSLATE_TILES ||
-            block == Blocks.CHISELED_DEEPSLATE;
+        if (block != Blocks.DEEPSLATE || !state.contains(Properties.AXIS)) return false;
+        Direction.Axis axis = state.get(Properties.AXIS);
+        return axis != Direction.Axis.Y;
     }
 
-    private boolean isArtificialAirPocket(BlockPos pos) {
-        if (mc.world == null) return false;
-
-        BlockState center = mc.world.getBlockState(pos);
-        if (center.getBlock() != Blocks.AIR) return false;
-        if (pos.getY() <= 2 || pos.getY() > maxScanY.get()) return false;
-
-        int solidNeighbors = 0;
-        for (Direction dir : Direction.values()) {
-            BlockState neighbor = mc.world.getBlockState(pos.offset(dir));
-            if (neighbor.isSolidBlock(mc.world, pos.offset(dir))) {
-                solidNeighbors++;
-            }
-        }
-
-        if (solidNeighbors < 6) return false;
-
-        int nearbyAirBlocks = 0;
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dz = -1; dz <= 1; dz++) {
-                    if (dx == 0 && dy == 0 && dz == 0) continue;
-
-                    BlockPos checkPos = pos.add(dx, dy, dz);
-                    if (mc.world.getBlockState(checkPos).getBlock() == Blocks.AIR) {
-                        nearbyAirBlocks++;
-                    }
-                }
-            }
-        }
-
-        if (nearbyAirBlocks > 0) return false;
-
-        int naturalBlocks = 0;
-        int totalChecked = 0;
-
-        for (int dx = -2; dx <= 2; dx++) {
-            for (int dy = -2; dy <= 2; dy++) {
-                for (int dz = -2; dz <= 2; dz++) {
-                    if (Math.abs(dx) <= 1 && Math.abs(dy) <= 1 && Math.abs(dz) <= 1) continue;
-
-                    BlockPos checkPos = pos.add(dx, dy, dz);
-                    BlockState checkState = mc.world.getBlockState(checkPos);
-                    Block block = checkState.getBlock();
-                    totalChecked++;
-
-                    if (block == Blocks.STONE || block == Blocks.DEEPSLATE ||
-                        block == Blocks.COBBLESTONE || block == Blocks.COBBLED_DEEPSLATE) {
-                        naturalBlocks++;
-                    }
-                }
-            }
-        }
-
-        return totalChecked > 0 && (naturalBlocks * 100 / totalChecked) >= 80;
+    private boolean isEndStone(BlockState state) {
+        return state.getBlock() == Blocks.END_STONE;
     }
 
-    private boolean isSuspiciousOre(BlockState state, BlockPos pos) {
-        if (!isValuableOre(state.getBlock())) return false;
-        return isCompletelyEnclosed(pos);
-    }
-
-    private boolean isValuableOre(Block block) {
-        return block == Blocks.DIAMOND_ORE || block == Blocks.DEEPSLATE_DIAMOND_ORE ||
-            block == Blocks.EMERALD_ORE || block == Blocks.DEEPSLATE_EMERALD_ORE ||
-            block == Blocks.GOLD_ORE || block == Blocks.DEEPSLATE_GOLD_ORE ||
-            block == Blocks.IRON_ORE || block == Blocks.DEEPSLATE_IRON_ORE ||
-            block == Blocks.ANCIENT_DEBRIS;
-    }
-
-    private boolean isCompletelyEnclosed(BlockPos pos) {
-        if (mc.world == null) return false;
-
-        for (Direction dir : Direction.values()) {
-            BlockPos adjacent = pos.offset(dir);
-            BlockState adjacentState = mc.world.getBlockState(adjacent);
-
-            if (adjacentState.isAir() || !adjacentState.isOpaque()) {
-                return false;
-            }
-        }
-        return true;
+    private boolean isTrialChamberBlock(BlockState state) {
+        Block block = state.getBlock();
+        return block == Blocks.WAXED_COPPER_BLOCK ||
+            block == Blocks.WAXED_OXIDIZED_COPPER ||
+            block == Blocks.TUFF_BRICKS;
     }
 
     private void notifyChunkFound(ChunkPos pos, String details) {
@@ -709,11 +704,24 @@ public class ChunkFinder extends Module {
         Long lastNotification = notificationTimes.get(pos);
         if (lastNotification != null && now - lastNotification < 45000) return;
 
+        String message = String.format("ChunkFinder [%d, %d] - Suspicious chunk detected - %s", pos.x, pos.z, details);
+
         mc.execute(() -> {
-            if (chatAlerts.get() && mc.player != null) {
-                String message = String.format("Suspicious chunk detected at [%d, %d] - %s",
-                    pos.x, pos.z, details);
-                mc.player.sendMessage(Text.literal("§6[ChunkFinder] §e" + message), false);
+            switch (notificationMode.get()) {
+                case Chat -> {
+                    if (chatAlerts.get() && mc.player != null) {
+                        mc.player.sendMessage(Text.literal(message), false);
+                    }
+                }
+                case Toast -> {
+                    mc.getToastManager().add(new MeteorToast(Items.CHEST, "ChunkFinder", message));
+                }
+                case Both -> {
+                    if (chatAlerts.get() && mc.player != null) {
+                        mc.player.sendMessage(Text.literal(message), false);
+                    }
+                    mc.getToastManager().add(new MeteorToast(Items.CHEST, "ChunkFinder", message));
+                }
             }
 
             if (playSound.get()) {
@@ -723,6 +731,42 @@ public class ChunkFinder extends Module {
 
             recentAlerts.offer(now);
             notificationTimes.put(pos, now);
+        });
+    }
+
+    private void notifyTrialChamber(String message) {
+        long now = System.currentTimeMillis();
+
+        if (recentAlerts.size() >= maxAlerts.get()) return;
+
+        String[] parts = message.split(" - ", 2);
+        String coordsPart = parts[0].replace("ChunkFinder ", "");
+        String detailsPart = parts.length > 1 ? parts[1] : "";
+
+        mc.execute(() -> {
+            switch (notificationMode.get()) {
+                case Chat -> {
+                    if (trialChamberAlerts.get() && mc.player != null) {
+                        mc.player.sendMessage(Text.literal(message), false);
+                    }
+                }
+                case Toast -> {
+                    mc.getToastManager().add(new MeteorToast(Items.CHEST, "ChunkFinder", String.format("%s - %s", coordsPart, detailsPart)));
+                }
+                case Both -> {
+                    if (trialChamberAlerts.get() && mc.player != null) {
+                        mc.player.sendMessage(Text.literal(message), false);
+                    }
+                    mc.getToastManager().add(new MeteorToast(Items.CHEST, "ChunkFinder", String.format("%s - %s", coordsPart, detailsPart)));
+                }
+            }
+
+            if (playSound.get()) {
+                mc.getSoundManager().play(PositionedSoundInstance.master(
+                    SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, 1.5f));
+            }
+
+            recentAlerts.offer(now);
         });
     }
 
@@ -751,11 +795,10 @@ public class ChunkFinder extends Module {
             return dx > viewDist + 3 || dz > viewDist + 3;
         });
 
-        // Clean up suspicious blocks that are too far away
         suspiciousBlocks.entrySet().removeIf(entry -> {
             BlockPos blockPos = entry.getKey();
             double distance = mc.player.getPos().distanceTo(Vec3d.ofCenter(blockPos));
-            return distance > viewDist * 16 + 80; // Clean up blocks beyond view distance + buffer
+            return distance > viewDist * 16 + 80;
         });
     }
 
@@ -774,7 +817,7 @@ public class ChunkFinder extends Module {
         }
 
         // Render individual suspicious blocks
-        if (highlightBlocks.get() && !suspiciousBlocks.isEmpty()) {
+        if (highlightBlocks.get()) {
             renderSuspiciousBlocks(event);
         }
     }
@@ -790,15 +833,6 @@ public class ChunkFinder extends Module {
 
         Box box = new Box(startX, y, startZ, endX + 1, y + h, endZ + 1);
         event.renderer.box(box, color, color, renderMode.get(), 0);
-
-        if (drawTracers.get()) {
-            Vec3d playerPos = mc.player.getEyePos();
-            Vec3d chunkCenter = new Vec3d(startX + 8, y + h / 2, startZ + 8);
-            Color tracerCol = new Color(tracerColor.get());
-
-            event.renderer.line(playerPos.x, playerPos.y, playerPos.z,
-                chunkCenter.x, chunkCenter.y, chunkCenter.z, tracerCol);
-        }
     }
 
     private void renderSuspiciousBlocks(Render3DEvent event) {
@@ -810,7 +844,6 @@ public class ChunkFinder extends Module {
             BlockPos pos = entry.getKey();
             SuspiciousBlock suspiciousBlock = entry.getValue();
 
-            // Skip if too far away
             double distance = mc.player.getPos().distanceTo(Vec3d.ofCenter(pos));
             if (distance > mc.options.getViewDistance().getValue() * 16) continue;
 
@@ -828,8 +861,8 @@ public class ChunkFinder extends Module {
             case DEEPSLATE -> new Color(deepslateBlockColor.get());
             case COBBLED_DEEPSLATE -> new Color(cobbledDeepslateBlockColor.get());
             case ROTATED_DEEPSLATE -> new Color(rotatedDeepslateBlockColor.get());
-            case AIR_POCKET -> new Color(airPocketBlockColor.get());
-            case ENCLOSED_ORE -> new Color(enclosedOreBlockColor.get());
+            case END_STONE -> new Color(endStoneBlockColor.get());
+            default -> null;
         };
     }
 
@@ -841,13 +874,12 @@ public class ChunkFinder extends Module {
         return String.valueOf(flaggedChunks.size());
     }
 
-    // Data classes
     private static class ChunkAnalysis {
         int deepslateCount = 0;
         int cobbledDeepslateCount = 0;
         int rotatedDeepslateCount = 0;
-        int airPocketCount = 0;
-        int enclosedOreCount = 0;
+        int endStoneCount = 0;
+        int trialChamberCount = 0;
     }
 
     private static class SuspiciousBlock {
@@ -864,7 +896,6 @@ public class ChunkFinder extends Module {
         DEEPSLATE,
         COBBLED_DEEPSLATE,
         ROTATED_DEEPSLATE,
-        AIR_POCKET,
-        ENCLOSED_ORE
+        END_STONE
     }
 }

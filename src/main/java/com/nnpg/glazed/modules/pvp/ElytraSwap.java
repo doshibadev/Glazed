@@ -37,11 +37,18 @@ public class ElytraSwap extends Module {
     private int delayTimer = 0;
 
     public ElytraSwap() {
-        super(GlazedAddon.pvp, "ElytraSwap", "Swap elytra with chestplate.");
+        super(GlazedAddon.pvp, "elytra-swap", "Swap elytra with chestplate once, then disable.");
     }
 
     @Override
     public void onActivate() {
+        // Flip the preferred item each time the module is toggled on
+        if (preferredItem.get() == PreferredItem.Elytra) {
+            preferredItem.set(PreferredItem.Chestplate);
+        } else {
+            preferredItem.set(PreferredItem.Elytra);
+        }
+
         delayTimer = swapDelay.get();
     }
 
@@ -53,14 +60,13 @@ public class ElytraSwap extends Module {
         }
 
         performSwap();
-        toggle();
+        toggle(); // turn module off after one swap
     }
 
     private void performSwap() {
         if (mc.player == null || mc.interactionManager == null) return;
 
         ClientPlayerEntity player = mc.player;
-        //versionutils
         ItemStack chestSlot = VersionUtil.getArmorStack(player, 2); // Chest armor slot
 
         boolean hasElytra = chestSlot.getItem() == Items.ELYTRA;
@@ -72,14 +78,12 @@ public class ElytraSwap extends Module {
                 swapWithInventoryItem(bestChestplate);
             } else {
                 ChatUtils.error("No chestplate found in inventory!");
-                return;
             }
         } else if (hasChestplate) {
             if (findItemInInventory(Items.ELYTRA) != -1) {
                 swapWithInventoryItem(Items.ELYTRA);
             } else {
                 ChatUtils.error("No elytra found in inventory!");
-                return;
             }
         } else {
             if (preferredItem.get() == PreferredItem.Elytra) {
@@ -87,7 +91,6 @@ public class ElytraSwap extends Module {
                     equipFromInventory(Items.ELYTRA);
                 } else {
                     ChatUtils.error("No elytra found in inventory!");
-                    return;
                 }
             } else {
                 Item bestChestplate = findBestChestplate();
@@ -95,25 +98,21 @@ public class ElytraSwap extends Module {
                     equipFromInventory(bestChestplate);
                 } else {
                     ChatUtils.error("No chestplate found in inventory!");
-                    return;
                 }
             }
         }
     }
 
     private void swapWithInventoryItem(Item item) {
-        if (mc.player == null || mc.interactionManager == null) return;
-
         int slot = findItemInInventory(item);
         if (slot != -1) {
             mc.interactionManager.clickSlot(0, slot, 0, SlotActionType.PICKUP, mc.player);
-            mc.interactionManager.clickSlot(0, 6, 0, SlotActionType.PICKUP, mc.player); // Chest slot is 6
-            mc.interactionManager.clickSlot(0, slot, 0, SlotActionType.PICKUP, mc.player);
+            mc.interactionManager.clickSlot(0, 6, 0, SlotActionType.PICKUP, mc.player); // Chest slot
+            mc.interactionManager.clickSlot(0, slot, 0, SlotActionType.PICKUP, mc.player); // Put back old item
         }
     }
 
     private Item findBestChestplate() {
-        // Priority order: Netherite -> Diamond -> Iron -> Gold -> Chain -> Leather
         Item[] chestplates = {
             Items.NETHERITE_CHESTPLATE,
             Items.DIAMOND_CHESTPLATE,
@@ -132,30 +131,25 @@ public class ElytraSwap extends Module {
     }
 
     private void equipFromInventory(Item item) {
-        if (mc.player == null || mc.interactionManager == null) return;
-
         int slot = findItemInInventory(item);
         if (slot != -1) {
             mc.interactionManager.clickSlot(0, slot, 0, SlotActionType.PICKUP, mc.player);
-            mc.interactionManager.clickSlot(0, 6, 0, SlotActionType.PICKUP, mc.player); // Chest slot is 6
+            mc.interactionManager.clickSlot(0, 6, 0, SlotActionType.PICKUP, mc.player); // Chest slot
+            mc.interactionManager.clickSlot(0, slot, 0, SlotActionType.PICKUP, mc.player); // Put back old item
         }
     }
 
     private int findItemInInventory(Item item) {
-        if (mc.player == null) return -1;
-
         for (int i = 0; i < 9; i++) {
             if (mc.player.getInventory().getStack(i).getItem() == item) {
                 return i + 36; // Convert to container slot
             }
         }
-
         for (int i = 9; i < 36; i++) {
             if (mc.player.getInventory().getStack(i).getItem() == item) {
-                return i; // Already container slot
+                return i;
             }
         }
-
         return -1;
     }
 
@@ -173,14 +167,8 @@ public class ElytraSwap extends Module {
         Chestplate("Chestplate");
 
         private final String title;
-
-        PreferredItem(String title) {
-            this.title = title;
-        }
-
-        @Override
-        public String toString() {
-            return title;
-        }
+        PreferredItem(String title) { this.title = title; }
+        @Override public String toString() { return title; }
     }
 }
+

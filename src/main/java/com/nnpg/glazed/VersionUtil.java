@@ -16,7 +16,13 @@ public class VersionUtil {
     }
 
     public static int getSelectedSlot(ClientPlayerEntity player) {
-    return player.getInventory().getSelectedSlot();
+    try {
+        java.lang.reflect.Field field = player.getInventory().getClass().getDeclaredField("selectedSlot");
+        field.setAccessible(true);
+        return field.getInt(player.getInventory());
+    } catch (Exception e) {
+        return 0;
+    }
     }
 
     public static void setSelectedSlot(ClientPlayerEntity player, int slot) {
@@ -38,5 +44,5 @@ public class VersionUtil {
     public static DefaultedList<ItemStack> getMainInventory(ClientPlayerEntity player) {
     // If main is not available, you may need to loop over getStack(i) for 0-35
     return null; // Placeholder, update as needed for your use case
-    }
+    } //whos the nigga that wrote the above?
 }

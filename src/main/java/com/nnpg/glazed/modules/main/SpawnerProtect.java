@@ -21,6 +21,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
+import net.minecraft.world.World;
 import meteordevelopment.meteorclient.systems.modules.misc.AutoReconnect;
 
 import java.net.URI;
@@ -85,26 +86,6 @@ public class SpawnerProtect extends Module {
         .build()
     );
 
-    private final Setting<Integer> miningTimeout = sgGeneral.add(new IntSetting.Builder()
-        .name("mining-timeout")
-        .description("Max time in seconds to mine a single spawner before restarting")
-        .defaultValue(3)
-        .min(1)
-        .max(30)
-        .sliderMax(30)
-        .build()
-    );
-
-    private final Setting<Integer> miningRestartDelay = sgGeneral.add(new IntSetting.Builder()
-        .name("mining-restart-delay")
-        .description("Delay in seconds before restarting mining after timeout")
-        .defaultValue(2)
-        .min(1)
-        .max(10)
-        .sliderMax(10)
-        .build()
-    );
-
     private final Setting<Integer> emergencyDistance = sgGeneral.add(new IntSetting.Builder()
         .name("emergency-distance")
         .description("Distance in blocks where player triggers immediate disconnect")
@@ -112,17 +93,6 @@ public class SpawnerProtect extends Module {
         .min(1)
         .max(20)
         .sliderMax(20)
-        .build()
-    );
-
-    // New setting for position tolerance
-    private final Setting<Double> positionTolerance = sgGeneral.add(new DoubleSetting.Builder()
-        .name("position-tolerance")
-        .description("Distance tolerance from start position to still consider player at original location")
-        .defaultValue(5.0)
-        .min(1.0)
-        .max(20.0)
-        .sliderMax(20.0)
         .build()
     );
 
@@ -148,7 +118,8 @@ public class SpawnerProtect extends Module {
         OPENING_CHEST,
         DEPOSITING_ITEMS,
         DISCONNECTING,
-        POSITION_DISPLACED  // New state for when player is not at start position
+        WORLD_CHANGED_ONCE,
+        WORLD_CHANGED_TWICE
     }
 
     private State currentState = State.IDLE;
@@ -167,22 +138,18 @@ public class SpawnerProtect extends Module {
     private int confirmDelay = 0;
     private boolean waiting = false;
 
-    // Mining timeout
-    private int miningStartTime = 0;
-    private boolean isMining = false;
-    private boolean miningTimeoutTriggered = false;
-    private int miningRestartTimer = 0;
+    private boolean isMiningCycle = true;
+    private int miningCycleTimer = 0;
+    private final int MINING_DURATION = 80;
+    private final int PAUSE_DURATION = 20;
 
-    // Ender chest
     private BlockPos targetChest = null;
     private int chestOpenAttempts = 0;
     private boolean emergencyDisconnect = false;
     private String emergencyReason = "";
 
-    // Position tracking variables
-    private Vec3d startPosition = null;
-    private boolean positionTracked = false;
-    private int positionCheckTimer = 0;
+    private World trackedWorld = null;
+    private int worldChangeCount = 0;
 
     public SpawnerProtect() {
         super(GlazedAddon.CATEGORY, "SpawnerProtect", "Breaks spawners and puts them in your inv when a player is detected");
@@ -193,12 +160,10 @@ public class SpawnerProtect extends Module {
         resetState();
         configureLegitMining();
 
-        // Record the starting position when module activates
-        if (mc.player != null) {
-            startPosition = mc.player.getPos();
-            positionTracked = true;
-            info("SpawnerProtect activated - Start position recorded: " +
-                String.format("%.1f, %.1f, %.1f", startPosition.x, startPosition.y, startPosition.z));
+        if (mc.world != null) {
+            trackedWorld = mc.world;
+            worldChangeCount = 0;
+            info("SpawnerProtect activated - Monitoring world: " + mc.world.getRegistryKey().getValue());
             info("Monitoring for players...");
         }
 
@@ -220,17 +185,12 @@ public class SpawnerProtect extends Module {
         recheckDelay = 0;
         confirmDelay = 0;
         waiting = false;
-        miningStartTime = 0;
-        isMining = false;
-        miningTimeoutTriggered = false;
-        miningRestartTimer = 0;
+        isMiningCycle = true;
+        miningCycleTimer = 0;
         targetChest = null;
         chestOpenAttempts = 0;
         emergencyDisconnect = false;
         emergencyReason = "";
-
-        // Don't reset position tracking variables here
-        positionCheckTimer = 0;
     }
 
     private void configureLegitMining() {
@@ -245,41 +205,24 @@ public class SpawnerProtect extends Module {
         }
     }
 
-    // New method to check if player is at start position
-    private boolean isPlayerAtStartPosition() {
-        if (!positionTracked || startPosition == null || mc.player == null) {
-            return true; // If we don't have start position, assume we're at start
-        }
-
-        Vec3d currentPos = mc.player.getPos();
-        double distance = currentPos.distanceTo(startPosition);
-
-        return distance <= positionTolerance.get();
-    }
-
     @EventHandler
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) return;
 
         tickCounter++;
-        positionCheckTimer++;
 
-        // Check position every 20 ticks (1 second)
-        if (positionCheckTimer >= 20) {
-            positionCheckTimer = 0;
-
-            if (!isPlayerAtStartPosition() && currentState == State.IDLE) {
-                currentState = State.POSITION_DISPLACED;
-                info("Player moved from start position - protection temporarily disabled");
-            } else if (isPlayerAtStartPosition() && currentState == State.POSITION_DISPLACED) {
-                currentState = State.IDLE;
-                info("Player returned to start position - protection re-enabled");
-            }
+        if (mc.world != trackedWorld) {
+            handleWorldChange();
+            return;
         }
 
-        // Handle position displaced state
-        if (currentState == State.POSITION_DISPLACED) {
-            return; // Do nothing while displaced from start position
+        if (currentState == State.WORLD_CHANGED_ONCE) {
+            return;
+        }
+
+        if (currentState == State.WORLD_CHANGED_TWICE) {
+            currentState = State.IDLE;
+            info("Returned to spawner world - resuming player monitoring");
         }
 
         if (checkEmergencyDisconnect()) {
@@ -310,20 +253,27 @@ public class SpawnerProtect extends Module {
             case DISCONNECTING:
                 handleDisconnecting();
                 break;
-            case POSITION_DISPLACED:
-                // This case is handled above, but included for completeness
-                break;
+        }
+    }
+
+    private void handleWorldChange() {
+        worldChangeCount++;
+        trackedWorld = mc.world;
+
+        if (worldChangeCount == 1) {
+            currentState = State.WORLD_CHANGED_ONCE;
+            info("World changed (TP to spawn) - pausing player detection until return");
+        } else if (worldChangeCount == 2) {
+            currentState = State.WORLD_CHANGED_TWICE;
+            worldChangeCount = 0;
+            info("World changed (back to spawners) - will resume monitoring");
         }
     }
 
     private boolean checkEmergencyDisconnect() {
-        // Don't check for emergency disconnect if we're not at start position
-        if (!isPlayerAtStartPosition()) {
-            return false;
-        }
-
         for (PlayerEntity player : mc.world.getPlayers()) {
             if (player == mc.player) continue;
+            if (player == null) continue;
             if (!(player instanceof AbstractClientPlayerEntity)) continue;
 
             String playerName = player.getGameProfile().getName();
@@ -339,8 +289,7 @@ public class SpawnerProtect extends Module {
                 emergencyDisconnect = true;
                 emergencyReason = "User " + playerName + " came too close";
 
-                //me
-                toggle(); //maybe?
+                toggle();
                 if (mc.world != null) {
                     mc.world.disconnect();
                 }
@@ -358,13 +307,9 @@ public class SpawnerProtect extends Module {
     }
 
     private void checkForPlayers() {
-        // Only check for players if we're at the start position
-        if (!isPlayerAtStartPosition()) {
-            return;
-        }
-
         for (PlayerEntity player : mc.world.getPlayers()) {
             if (player == mc.player) continue;
+            if (player == null) continue;
             if (!(player instanceof AbstractClientPlayerEntity)) continue;
 
             String playerName = player.getGameProfile().getName();
@@ -400,17 +345,6 @@ public class SpawnerProtect extends Module {
     private void handleGoingToSpawners() {
         setSneaking(true);
 
-        if (miningTimeoutTriggered) {
-            miningRestartTimer++;
-            if (miningRestartTimer >= miningRestartDelay.get() * 20) {
-                miningTimeoutTriggered = false;
-                miningRestartTimer = 0;
-                info("Restarting mining after timeout delay...");
-            } else {
-                return;
-            }
-        }
-
         if (currentTarget == null) {
             currentTarget = findNearestSpawner();
 
@@ -418,31 +352,40 @@ public class SpawnerProtect extends Module {
                 waiting = true;
                 recheckDelay = 0;
                 confirmDelay = 0;
+                stopBreaking();
                 info("No more spawners found, waiting to confirm...");
             } else if (currentTarget != null) {
-                miningStartTime = tickCounter;
-                isMining = true;
+                isMiningCycle = true;
+                miningCycleTimer = 0;
                 info("Starting to mine spawner at " + currentTarget);
             }
         } else {
-            if (isMining && (tickCounter - miningStartTime) > (miningTimeout.get() * 20)) {
-                info("Mining timeout reached! Made by Glazed. Will restart mining in " + miningRestartDelay.get() + " seconds...");
-                stopBreaking();
-                miningTimeoutTriggered = true;
-                miningRestartTimer = 0;
-                isMining = false;
-                miningStartTime = 0;
-                return;
+            miningCycleTimer++;
+            
+            if (isMiningCycle) {
+                if (miningCycleTimer >= MINING_DURATION) {
+                    isMiningCycle = false;
+                    miningCycleTimer = 0;
+                    stopBreaking();
+                    info("Pausing mining for 1 second...");
+                } else {
+                    lookAtBlock(currentTarget);
+                    breakBlock(currentTarget);
+                }
+            } else {
+                if (miningCycleTimer >= PAUSE_DURATION) {
+                    isMiningCycle = true;
+                    miningCycleTimer = 0;
+                    info("Resuming mining...");
+                }
             }
-
-            lookAtBlock(currentTarget);
-            breakBlock(currentTarget);
 
             if (mc.world.getBlockState(currentTarget).isAir()) {
                 info("Spawner at " + currentTarget + " broken! Looking for next spawner...");
                 currentTarget = null;
                 stopBreaking();
-                isMining = false;
+                isMiningCycle = true;
+                miningCycleTimer = 0;
                 transferDelayCounter = 5;
             }
         }
@@ -453,7 +396,6 @@ public class SpawnerProtect extends Module {
     }
 
     private void handleWaitingForSpawners() {
-        //Glazed copyright
         recheckDelay++;
         if (recheckDelay == delaySeconds.get() * 20) {
             BlockPos foundSpawner = findNearestSpawner();
@@ -461,8 +403,8 @@ public class SpawnerProtect extends Module {
             if (foundSpawner != null) {
                 waiting = false;
                 currentTarget = foundSpawner;
-                miningStartTime = tickCounter;
-                isMining = true;
+                isMiningCycle = true;
+                miningCycleTimer = 0;
                 info("Found additional spawner at " + foundSpawner);
                 return;
             }
@@ -474,7 +416,6 @@ public class SpawnerProtect extends Module {
                 stopBreaking();
                 spawnersMinedSuccessfully = true;
                 setSneaking(false);
-                isMining = false;
                 currentState = State.GOING_TO_CHEST;
                 info("All spawners mined successfully. Looking for ender chest...");
                 tickCounter = 0;
@@ -594,7 +535,7 @@ public class SpawnerProtect extends Module {
         Vec3d playerPos = mc.player.getPos();
         Vec3d targetPos = Vec3d.ofCenter(target);
         Vec3d direction = targetPos.subtract(playerPos).normalize();
-        //Glazed copyright
+
         double yaw = Math.toDegrees(Math.atan2(-direction.x, direction.z));
         mc.player.setYaw((float) yaw);
 
@@ -608,14 +549,13 @@ public class SpawnerProtect extends Module {
         }
 
         KeyBinding.setKeyPressed(mc.options.forwardKey.getDefaultKey(), false);
-        // jumps to open ec. idk why it doesnt work if it doesnt jump
         KeyBinding.setKeyPressed(mc.options.jumpKey.getDefaultKey(), true);
 
         if (chestOpenAttempts < 20) {
             lookAtBlock(targetChest);
         }
 
-        if (chestOpenAttempts % 5 == 0) { //0.25 seconds
+        if (chestOpenAttempts % 5 == 0) {
             if (mc.interactionManager != null && mc.player != null) {
                 mc.interactionManager.interactBlock(
                     mc.player,
@@ -759,7 +699,7 @@ public class SpawnerProtect extends Module {
         }
 
         String embedJson = createWebhookPayload(messageContent, discordTimestamp);
-        //Glazed copyright
+
         new Thread(() -> {
             try {
                 HttpClient client = HttpClient.newHttpClient();

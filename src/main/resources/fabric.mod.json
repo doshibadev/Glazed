@@ -13,7 +13,7 @@
     "discord": "https://discord.gg/TCQDpG8ByY"
 
   },
-  "license": "GPL-3.0",
+  "license": "All Rights Reserved",
   "icon": "assets/template/icon.png",
   "environment": "client",
   "entrypoints": {
@@ -37,7 +37,7 @@
   },
   "depends": {
     "java": ">=21",
-    "minecraft": ["${mc_version}"],
+    "minecraft": [ "${mc_version}" ],
     "meteor-client": "*"
   }
 

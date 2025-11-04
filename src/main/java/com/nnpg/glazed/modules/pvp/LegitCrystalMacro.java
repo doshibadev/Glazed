@@ -1,7 +1,6 @@
 package com.nnpg.glazed.modules.pvp;
 
 import com.nnpg.glazed.GlazedAddon;
-import com.nnpg.glazed.VersionUtil;
 import com.nnpg.glazed.utils.glazed.BlockUtil;
 import com.nnpg.glazed.utils.glazed.KeyUtils;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -13,9 +12,9 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.decoration.EndCrystalEntity;
 import net.minecraft.entity.mob.SlimeEntity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.Items;
 import net.minecraft.item.ItemStack;
-import net.minecraft.screen.slot.SlotActionType;
+import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.EntityHitResult;
@@ -23,8 +22,8 @@ import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 
 public class LegitCrystalMacro extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -58,274 +57,163 @@ public class LegitCrystalMacro extends Module {
         .build()
     );
 
-    private final Setting<Boolean> placeObi = sgGeneral.add(new BoolSetting.Builder()
-        .name("place-obi")
-        .description("Automatically places obsidian if not looking at obsidian or bedrock.")
-        .defaultValue(false)
-        .build()
-    );
-
-    private final Setting<Double> obiSwitchDelay = sgGeneral.add(new DoubleSetting.Builder()
-        .name("obi-switch-delay")
-        .description("The delay in ticks when switching to/from obsidian.")
-        .defaultValue(0.0)
-        .min(0.0)
-        .max(20.0)
-        .sliderMax(20.0)
-        .visible(() -> placeObi.get())
-        .build()
-    );
-
-    private final Setting<Boolean> pauseOnKill = sgGeneral.add(new BoolSetting.Builder()
-        .name("pause-on-kill")
-        .description("Temporarily pauses the module when a player is killed to prevent blowing up the items.")
+    private final Setting<Boolean> stopOnKill = sgGeneral.add(new BoolSetting.Builder()
+        .name("stop-on-kill")
+        .description("Pauses the macro when a nearby player dies, then resumes after 5 seconds.")
         .defaultValue(true)
         .build()
     );
 
-    private final Setting<Double> pauseDelay = sgGeneral.add(new DoubleSetting.Builder()
-        .name("pause-delay")
-        .description("How long to pause the module after a player death (in seconds).")
-        .defaultValue(2.0)
-        .min(0.5)
-        .max(10.0)
-        .sliderMax(10.0)
-        .visible(() -> pauseOnKill.get())
+    private final Setting<Boolean> placeObsidianIfMissing = sgGeneral.add(new BoolSetting.Builder()
+        .name("place-obsidian-if-missing")
+        .description("Places obsidian if the target block isn't obsidian or bedrock.")
+        .defaultValue(true)
         .build()
     );
 
     private int placeDelayCounter;
     private int breakDelayCounter;
-    private int obiSwitchDelayCounter;
-    private int pauseCounter;
-    private boolean isPlacingObi;
-    private BlockHitResult pendingObiPlacement;
-    public boolean isActive;
-    private List<PlayerEntity> deadPlayers = new ArrayList<>();
+
+    private final Set<PlayerEntity> deadPlayers = new HashSet<>();
+    private boolean paused = false;
+    private long resumeTime = 0;
 
     public LegitCrystalMacro() {
-        super(GlazedAddon.pvp, "LegitCystalMacro", "Automatically crystals fast for you");
+        super(GlazedAddon.pvp, "LegitCrystalMacro", "Automatically crystals fast for you");
     }
 
     @Override
     public void onActivate() {
-        this.resetCounters();
-        this.isActive = false;
-        this.isPlacingObi = false;
-        this.pendingObiPlacement = null;
-        this.pauseCounter = 0;
-        this.deadPlayers = new ArrayList<>();
+        resetCounters();
+        deadPlayers.clear();
+        paused = false;
+        resumeTime = 0;
     }
 
     @Override
     public void onDeactivate() {
-        this.resetCounters();
-        this.isActive = false;
-        this.isPlacingObi = false;
-        this.pendingObiPlacement = null;
-        this.pauseCounter = 0;
-        this.deadPlayers.clear();
+        resetCounters();
+        deadPlayers.clear();
+        paused = false;
+        resumeTime = 0;
     }
 
     private void resetCounters() {
-        this.placeDelayCounter = 0;
-        this.breakDelayCounter = 0;
-        this.obiSwitchDelayCounter = 0;
+        placeDelayCounter = 0;
+        breakDelayCounter = 0;
     }
 
     @EventHandler
-    private void onTick(final TickEvent.Pre tickEvent) {
-        if (mc.currentScreen != null) {
-            return;
-        }
-        this.updateCounters();
-        if (mc.player.isUsingItem()) {
-            return;
-        }
+    private void onTick(final TickEvent.Pre event) {
+        if (mc.currentScreen != null) return;
 
-        // Check for dead players and pause if needed
-        if (this.pauseOnKill.get() && this.checkForDeadPlayers()) {
-            this.pauseCounter = (int)(pauseDelay.get() * 20); // Convert seconds to ticks
+        updateCounters();
+
+        if (paused && System.currentTimeMillis() >= resumeTime) {
+            paused = false;
             if (mc.player != null) {
-                mc.player.sendMessage(net.minecraft.text.Text.literal("§7[§bLegitCrystalMacro§7] §ePaused for " + pauseDelay.get() + " seconds due to player death"), false);
+                mc.player.sendMessage(net.minecraft.text.Text.literal(
+                    "§7[§bLegitCrystalMacro§7] §aResumed after stop-on-kill"
+                ), false);
             }
         }
 
-        // Check if module is paused due to player death
-        if (this.pauseCounter > 0) {
+        if (paused) return;
+        if (!isKeyActive()) return;
+        if (mc.player.isUsingItem()) return;
+        if (mc.player.getMainHandStack().getItem() != Items.END_CRYSTAL) return;
+
+        if (stopOnKill.get() && checkForDeadPlayers()) {
+            paused = true;
+            resumeTime = System.currentTimeMillis() + 5000;
+            if (mc.player != null) {
+                mc.player.sendMessage(net.minecraft.text.Text.literal(
+                    "§7[§bLegitCrystalMacro§7] §cPaused due to player death (will resume in 5s)"
+                ), false);
+            }
             return;
         }
 
-        if (!this.isKeyActive()) {
-            return;
-        }
-
-        if (this.isPlacingObi && this.obiSwitchDelayCounter <= 0 && this.pendingObiPlacement != null) {
-            this.finishObsidianPlacement();
-            return;
-        }
-
-        if (mc.player.getMainHandStack().getItem() != Items.END_CRYSTAL) {
-            return;
-        }
-        this.handleInteraction();
+        handleInteraction();
     }
 
     private void updateCounters() {
-        if (this.placeDelayCounter > 0) {
-            --this.placeDelayCounter;
-        }
-        if (this.breakDelayCounter > 0) {
-            --this.breakDelayCounter;
-        }
-        if (this.obiSwitchDelayCounter > 0) {
-            --this.obiSwitchDelayCounter;
-        }
-        if (this.pauseCounter > 0) {
-            --this.pauseCounter;
-        }
+        if (placeDelayCounter > 0) --placeDelayCounter;
+        if (breakDelayCounter > 0) --breakDelayCounter;
     }
 
     private boolean isKeyActive() {
-        final int d = this.activateKey.get();
-        if (d != -1 && !KeyUtils.isKeyPressed(d)) {
-            this.resetCounters();
-            this.isPlacingObi = false;
-            this.pendingObiPlacement = null;
-            return this.isActive = false;
-        }
-        return this.isActive = true;
+        int d = activateKey.get();
+        return d == -1 || KeyUtils.isKeyPressed(d);
     }
 
     private void handleInteraction() {
-        final HitResult crosshairTarget = this.mc.crosshairTarget;
-        if (this.mc.crosshairTarget instanceof BlockHitResult) {
-            this.handleBlockInteraction((BlockHitResult) crosshairTarget);
-        } else if (this.mc.crosshairTarget instanceof final EntityHitResult entityHitResult) {
-            this.handleEntityInteraction(entityHitResult);
+        HitResult crosshairTarget = mc.crosshairTarget;
+        if (crosshairTarget instanceof BlockHitResult blockHit) {
+            handleBlockInteraction(blockHit);
+        } else if (crosshairTarget instanceof EntityHitResult entityHit) {
+            handleEntityInteraction(entityHit);
         }
     }
 
-    private void handleBlockInteraction(final BlockHitResult blockHitResult) {
-        if (blockHitResult.getType() != HitResult.Type.BLOCK) {
-            return;
-        }
-        if (this.placeDelayCounter > 0 || this.isPlacingObi) {
-            return;
-        }
-        final BlockPos blockPos = blockHitResult.getBlockPos();
+    private void handleBlockInteraction(BlockHitResult blockHitResult) {
+        if (blockHitResult.getType() != HitResult.Type.BLOCK) return;
+        if (placeDelayCounter > 0) return;
 
-        if (this.placeObi.get() && !BlockUtil.isBlockAtPosition(blockPos, Blocks.OBSIDIAN) && !BlockUtil.isBlockAtPosition(blockPos, Blocks.BEDROCK)) {
-            if (this.startObsidianPlacement(blockHitResult)) {
-                return;
-            }
-        } else if ((BlockUtil.isBlockAtPosition(blockPos, Blocks.OBSIDIAN) || BlockUtil.isBlockAtPosition(blockPos, Blocks.BEDROCK)) && this.isValidCrystalPlacement(blockPos)) {
+        BlockPos blockPos = blockHitResult.getBlockPos();
+        boolean isObsidianOrBedrock = BlockUtil.isBlockAtPosition(blockPos, Blocks.OBSIDIAN) ||
+                                      BlockUtil.isBlockAtPosition(blockPos, Blocks.BEDROCK);
+
+        if (!isObsidianOrBedrock && placeObsidianIfMissing.get()) {
+            int obsidianSlot = findObsidianSlot();
+            int crystalSlot = findCrystalSlot();
+
+            if (obsidianSlot == -1 || crystalSlot == -1) return;
+
+            mc.player.networkHandler.sendPacket(new UpdateSelectedSlotC2SPacket(obsidianSlot));
             BlockUtil.interactWithBlock(blockHitResult, true);
-            this.placeDelayCounter = this.placeDelay.get().intValue();
-        }
-    }
+            mc.player.swingHand(Hand.MAIN_HAND);
+            placeDelayCounter = placeDelay.get().intValue();
 
-    private boolean startObsidianPlacement(final BlockHitResult blockHitResult) {
-        if (mc.player == null || mc.world == null) {
-            return false;
-        }
-
-        int obiSlot = -1;
-
-        for (int i = 0; i < mc.player.getInventory().size(); i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            if (stack.getItem() == Items.OBSIDIAN) {
-                obiSlot = i;
-                break;
-            }
-        }
-
-        if (obiSlot == -1) {
-            return false;
-        }
-
-        int currentSlot = VersionUtil.getSelectedSlot(mc.player);
-        int hotbarIndex = 36 + currentSlot;
-
-        if (obiSlot >= 0 && obiSlot <= 8) {
-            VersionUtil.setSelectedSlot(mc.player, obiSlot);
-        } else {
-            int invSlot = obiSlot;
-
-            mc.interactionManager.clickSlot(0, invSlot, 0, SlotActionType.PICKUP, mc.player);
-            mc.interactionManager.clickSlot(0, hotbarIndex, 0, SlotActionType.PICKUP, mc.player);
-            mc.interactionManager.clickSlot(0, invSlot, 0, SlotActionType.PICKUP, mc.player);
-        }
-
-        this.isPlacingObi = true;
-        this.pendingObiPlacement = blockHitResult;
-        this.obiSwitchDelayCounter = this.obiSwitchDelay.get().intValue();
-
-        return true;
-    }
-
-    private void finishObsidianPlacement() {
-        if (this.pendingObiPlacement == null) {
-            this.isPlacingObi = false;
+            mc.player.networkHandler.sendPacket(new UpdateSelectedSlotC2SPacket(crystalSlot));
             return;
         }
 
-        BlockUtil.interactWithBlock(this.pendingObiPlacement, true);
-
-        int currentSlot = VersionUtil.getSelectedSlot(mc.player);
-
-        int crystalSlot = -1;
-        for (int i = 0; i < 9; i++) {
-            ItemStack stack = mc.player.getInventory().getStack(i);
-            if (stack.getItem() == Items.END_CRYSTAL) {
-                crystalSlot = i;
-                break;
-            }
+        if (isObsidianOrBedrock && isValidCrystalPlacement(blockPos)) {
+            BlockUtil.interactWithBlock(blockHitResult, true);
+            placeDelayCounter = placeDelay.get().intValue();
         }
-
-        if (crystalSlot != -1) {
-            VersionUtil.setSelectedSlot(mc.player, crystalSlot);
-        }
-
-        final BlockPos blockPos = this.pendingObiPlacement.getBlockPos();
-        if (this.isValidCrystalPlacement(blockPos)) {
-            BlockUtil.interactWithBlock(this.pendingObiPlacement, true);
-            this.placeDelayCounter = this.placeDelay.get().intValue();
-        }
-
-        this.isPlacingObi = false;
-        this.pendingObiPlacement = null;
     }
 
-    private void handleEntityInteraction(final EntityHitResult entityHitResult) {
-        if (this.breakDelayCounter > 0 || this.isPlacingObi) {
-            return;
-        }
-        final Entity entity = entityHitResult.getEntity();
-        if (!(entity instanceof EndCrystalEntity) && !(entity instanceof SlimeEntity)) {
-            return;
-        }
-        this.mc.interactionManager.attackEntity(this.mc.player, entity);
-        this.mc.player.swingHand(Hand.MAIN_HAND);
-        this.breakDelayCounter = this.breakDelay.get().intValue();
+    private void handleEntityInteraction(EntityHitResult entityHitResult) {
+        if (breakDelayCounter > 0) return;
+
+        Entity entity = entityHitResult.getEntity();
+        if (!(entity instanceof EndCrystalEntity) && !(entity instanceof SlimeEntity)) return;
+
+        mc.interactionManager.attackEntity(mc.player, entity);
+        mc.player.swingHand(Hand.MAIN_HAND);
+        breakDelayCounter = breakDelay.get().intValue();
     }
 
-    private boolean isValidCrystalPlacement(final BlockPos blockPos) {
-        final BlockPos up = blockPos.up();
-        if (!this.mc.world.isAir(up)) {
-            return false;
-        }
-        final int getX = up.getX();
-        final int getY = up.getY();
-        final int compareTo = up.getZ();
-        return this.mc.world.getOtherEntities(null, new Box(getX, getY, compareTo, getX + 1.0, getY + 2.0, compareTo + 1.0)).isEmpty();
+    private boolean isValidCrystalPlacement(BlockPos blockPos) {
+        BlockPos up = blockPos.up();
+        if (!mc.world.isAir(up)) return false;
+
+        int x = up.getX(), y = up.getY(), z = up.getZ();
+        return mc.world.getOtherEntities(null, new Box(x, y, z, x + 1.0, y + 2.0, z + 1.0)).isEmpty();
     }
 
     private boolean checkForDeadPlayers() {
         if (mc.world == null) return false;
 
         for (PlayerEntity player : mc.world.getPlayers()) {
-            if (player != mc.player && player.getHealth() <= 0) {
+            if (player == mc.player) continue;
+
+            String name = player.getGameProfile().getName();
+            boolean isBedrock = name.startsWith(".");
+
+            if (player.isDead() || player.getHealth() <= 0) {
                 if (!deadPlayers.contains(player)) {
                     deadPlayers.add(player);
                     return true;
@@ -333,9 +221,23 @@ public class LegitCrystalMacro extends Module {
             }
         }
 
-        // Clean up players that are no longer dead
-        deadPlayers.removeIf(player -> player.getHealth() > 0);
-
+        deadPlayers.removeIf(p -> !p.isDead() && p.getHealth() > 0);
         return false;
+    }
+
+    private int findObsidianSlot() {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isOf(Items.OBSIDIAN)) return i;
+        }
+        return -1;
+    }
+
+    private int findCrystalSlot() {
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.isOf(Items.END_CRYSTAL)) return i;
+        }
+        return -1;
     }
 }
