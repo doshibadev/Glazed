@@ -13,6 +13,7 @@ import net.minecraft.world.LightType;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class LightESP extends Module {
     private final SettingGroup sgGeneral = settings.getDefaultGroup();
@@ -55,6 +56,13 @@ public class LightESP extends Module {
         .build()
     );
 
+    private final Setting<Boolean> threading = sgGeneral.add(new BoolSetting.Builder()
+        .name("threading")
+        .description("Use a separate thread for scanning.")
+        .defaultValue(true)
+        .build()
+    );
+
     private final Setting<SettingColor> color = sgRender.add(new ColorSetting.Builder()
         .name("color")
         .description("Color of the box")
@@ -68,7 +76,8 @@ public class LightESP extends Module {
         .build()
     );
 
-    private final Set<BlockPos> spots = new HashSet<>();
+    private Set<BlockPos> spots = new HashSet<>();
+    private final AtomicBoolean scanning = new AtomicBoolean(false);
     private int timer = 0;
 
     public LightESP() {
@@ -79,6 +88,7 @@ public class LightESP extends Module {
     public void onActivate() {
         spots.clear();
         timer = 0;
+        scanning.set(false);
     }
 
     @EventHandler
@@ -91,37 +101,67 @@ public class LightESP extends Module {
         }
         timer = updateDelay.get();
 
-        spots.clear();
-        int r = range.get();
-        BlockPos pPos = mc.player.getBlockPos();
+        if (threading.get()) {
+            if (scanning.get()) return;
+            scanning.set(true);
 
-        // rip fps if range is high
+            BlockPos pPos = mc.player.getBlockPos();
+            int r = range.get();
+            int yThresh = yThreshold.get();
+            int minL = minLight.get();
+
+            // multithreading go brrr
+            new Thread(() -> {
+                Set<BlockPos> newSpots = scan(pPos, r, yThresh, minL);
+                synchronized (this) {
+                    spots = newSpots;
+                }
+                scanning.set(false);
+            }, "LightESP-Scan").start();
+        } else {
+            Set<BlockPos> newSpots = scan(mc.player.getBlockPos(), range.get(), yThreshold.get(), minLight.get());
+            synchronized (this) {
+                spots = newSpots;
+            }
+        }
+    }
+
+    private Set<BlockPos> scan(BlockPos pPos, int r, int yThresh, int minL) {
+        Set<BlockPos> newSpots = new HashSet<>();
+
+        // heavy loop here
         for (int x = -r; x <= r; x++) {
             for (int y = -r; y <= r; y++) {
                 for (int z = -r; z <= r; z++) {
                     BlockPos pos = pPos.add(x, y, z);
 
                     // yeet the sky light or high altitude blocks
-                    if (pos.getY() > yThreshold.get()) continue;
+                    if (pos.getY() > yThresh) continue;
 
                     // we look for air/blocks receiving block light (torches etc)
                     if (mc.world.getBlockState(pos).isAir()) {
                         int lvl = mc.world.getLightLevel(LightType.BLOCK, pos);
-                        if (lvl >= minLight.get()) {
-                            spots.add(pos);
+                        if (lvl >= minL) {
+                            newSpots.add(pos);
                         }
                     }
                 }
             }
         }
+        return newSpots;
     }
 
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (spots.isEmpty()) return;
+        Set<BlockPos> renderSpots;
+        synchronized (this) {
+            renderSpots = spots;
+        }
+
+        if (renderSpots.isEmpty()) return;
 
         // found their secret base lmao
-        for (BlockPos pos : spots) {
+        for (BlockPos pos : renderSpots) {
             event.renderer.box(pos, color.get(), color.get(), shapeMode.get(), 0);
         }
     }
